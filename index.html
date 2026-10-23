@@ -1403,6 +1403,11 @@ html,body,.pane,.pc-body,.pc-page,.feed{overscroll-behavior:none}
 .mp-vol input{flex:1;accent-color:var(--ink);min-width:0}
 @media (max-width:900px){ .music-pop{right:16px;width:min(260px,calc(100vw - 32px))} }
 
+
+/* v50: панель музыки поверх окон (окно компьютера тоже на слое 60) */
+.music-pop{position:fixed!important;z-index:1000;right:auto}
+@media (min-width:901px){ .music-pop{right:auto} }
+
 </style>
 </head>
 <body>
@@ -3106,7 +3111,7 @@ function monitorHTML(inner, clock) {
 
 /* ===== v48: фоновая музыка. Трек 3 мин 12 с, в конце он сам затихает; следующий круг начинается на 183-й секунде
    с мягким нарастанием, поэтому шва не слышно. Включается первым нажатием «Войти в кабинет», кнопка в шапке выключает. ===== */
-const MUSIC = { on: true, ctx: null, buf: null, master: null, el: null, next: 0, timer: 0, loading: false, VOL: 0.3, LOOP_AT: 183, FADE_IN: 2.5 };
+const MUSIC = { on: true, ctx: null, buf: null, master: null, el: null, next: 0, timer: 0, loading: false, VOL: 0.55, LOOP_AT: 183, FADE_IN: 2.5 };
 try { MUSIC.on = localStorage.getItem('dp-music') !== 'off'; const v = +localStorage.getItem('dp-music-vol'); if (v > 0) MUSIC.VOL = v; } catch (e) {}
 function musicVolume(v) {  // v от 0 до 1
   if (v <= 0) { if (MUSIC.on) { MUSIC.on = false; musicStop(); try { localStorage.setItem('dp-music', 'off'); } catch (e) {} } musicButton(); return; }
@@ -3116,11 +3121,11 @@ function musicVolume(v) {  // v от 0 до 1
   if (MUSIC.el) MUSIC.el.volume = v;
   musicButton();
 }
-function musicSchedule(at) {
+function musicSchedule(at, first) {
   const { ctx, buf } = MUSIC; at = Math.max(at, ctx.currentTime + 0.05);
   const src = ctx.createBufferSource(), g = ctx.createGain();
   src.buffer = buf; src.connect(g); g.connect(MUSIC.master);
-  g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(1, at + MUSIC.FADE_IN);
+  g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(1, at + (first ? 0.4 : MUSIC.FADE_IN));
   src.start(at); src.stop(at + buf.duration);
   MUSIC.next = at + MUSIC.LOOP_AT;
   clearTimeout(MUSIC.timer);
@@ -3136,7 +3141,7 @@ function musicStart() {
   const ctx = MUSIC.ctx = new AC(); ctx.resume();  // создаём по нажатию: так браузер разрешает звук
   MUSIC.master = ctx.createGain(); MUSIC.master.gain.value = MUSIC.VOL; MUSIC.master.connect(ctx.destination);
   fetch(ART.music).then(r => r.arrayBuffer()).then(a => new Promise((ok, no) => ctx.decodeAudioData(a, ok, no)))
-    .then(buf => { MUSIC.buf = buf; if (MUSIC.on) musicSchedule(ctx.currentTime); })
+    .then(buf => { MUSIC.buf = buf; if (MUSIC.on) musicSchedule(ctx.currentTime, true); })
     .catch(() => {  // файл открыт с диска и браузер не дал прочитать трек: простой повтор через <audio>
       MUSIC.ctx = null; const el = MUSIC.el = new Audio(ART.music); el.loop = true; el.volume = MUSIC.VOL; if (MUSIC.on) el.play().catch(() => {});
     });
@@ -3155,7 +3160,12 @@ function musicButton() {
 }
 document.addEventListener('click', e => {
   const pop = document.getElementById('musicPop');
-  if (e.target.closest('#musicBtn')) { pop.hidden = !pop.hidden; musicButton(); return; }  // нота открывает панель
+  if (e.target.closest('#musicBtn')) {
+    if (pop.parentElement !== document.body) document.body.appendChild(pop);
+    const r = document.getElementById('musicBtn').getBoundingClientRect();
+    pop.style.top = (r.bottom + 8) + 'px'; pop.style.right = Math.max(12, innerWidth - r.right) + 'px';
+    pop.hidden = !pop.hidden; musicButton(); return;
+  }  // нота открывает панель
   if (e.target.closest('#musicToggle')) {
     MUSIC.on = !MUSIC.on; try { localStorage.setItem('dp-music', MUSIC.on ? 'on' : 'off'); } catch (er) {}
     MUSIC.on ? musicStart() : musicStop(); musicButton(); return;
@@ -3163,6 +3173,7 @@ document.addEventListener('click', e => {
   if (pop && !pop.hidden && !e.target.closest('#musicPop')) pop.hidden = true;  // нажатие мимо закрывает панель
   if (e.target.closest('#fresh, #cont')) musicStart();
 }, true);
+window.addEventListener('resize', () => { const p = document.getElementById('musicPop'); if (p) p.hidden = true; });
 document.addEventListener('input', e => { if (e.target.id === 'musicVol') musicVolume(+e.target.value / 100); });
 // вкладка скрыта — музыка на паузе, вернулись — играет дальше
 document.addEventListener('visibilitychange', () => {
